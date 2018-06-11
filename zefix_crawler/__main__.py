@@ -2,6 +2,7 @@ import sys
 import scrapy
 import json
 from scrapy.crawler import CrawlerProcess
+import itertools
 
 class JsonWriterPipeline(object):
     def open_spider(self, spider):
@@ -24,8 +25,10 @@ class ZefixSpider(scrapy.Spider):
     start_urls = ['https://www.zefix.ch/ZefixREST/api/v1/firm/search.json']
     headers = {'Content-Type': 'application/json'}
 
-    # TODO: add all 3 character permutations
-    search_queries = ['aaa']
+    alphabet = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't',
+                 'u', 'v', 'w', 'x', 'y', 'z']
+    search_queries = [''.join(t) for t in itertools.product(alphabet, repeat=3)]
+
     max_entries = 30
 
     custom_settings = {
@@ -37,15 +40,19 @@ class ZefixSpider(scrapy.Spider):
     def start_requests(self):
         for search_query in self.search_queries:
             params = {'name': search_query, 'maxEntries': self.max_entries, 'offset': 0}
-            yield scrapy.Request(self.listing_base_url,
+            request = scrapy.Request(self.listing_base_url,
                                  method='POST',
                                  body=json.dumps(params),
                                  headers=self.headers,
                                  callback=self.parse_listing,
                                  errback=self.errback_listing)
+            request.meta['init_params'] = params
+            yield request
 
     def parse_listing(self, response):
         self.logger.info("Parsing listing")
+
+        init_params = response.meta['init_params']
 
         doc = json.loads(response.body_as_unicode())
         # * yield a bunch of view requests
@@ -56,13 +63,15 @@ class ZefixSpider(scrapy.Spider):
         # * yield a pageinated view request
         if doc['hasMoreResults']:
             next_offset = doc['offset'] + self.max_entries
-            params = {'name': "aaa", 'maxEntries': self.max_entries, 'offset': next_offset}
-            yield scrapy.Request(self.listing_base_url,
+            params = {'name': init_params['name'], 'maxEntries': self.max_entries, 'offset': next_offset}
+            request = scrapy.Request(self.listing_base_url,
                                 method='POST',
                                 headers=self.headers,
                                 body=json.dumps(params),
                                 callback=self.parse_listing,
                                 errback=self.errback_listing)
+            request.meta['init_params'] = init_params
+            yield request
 
     def parse_view(self, response):
         self.logger.info("Parsing view")
